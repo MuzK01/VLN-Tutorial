@@ -48,7 +48,7 @@ def load_datasets(splits):
     data = []
     for split in splits:
         assert split in ['train', 'val_seen', 'val_unseen', 'test']
-        with open('R2R_benchmark/data/R2R_%s.json' % split) as f:
+        with open('seq2seq/data/R2R_%s.json' % split) as f:
             data += json.load(f)
     return data
 

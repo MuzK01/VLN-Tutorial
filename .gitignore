@@ -4,6 +4,9 @@ __pycache__/
 *$py.class
 data/
 datasets/
+ResNet-152-imagenet.tsv
+snapshots/
+plots/
 # C extensions
 *.so
 

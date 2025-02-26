@@ -40,7 +40,7 @@ class EnvBatch():
             self.image_w = 640
             self.image_h = 480
             self.vfov = 60
-        connectivity_dir = '/VLN-Tutorial/Matterport3DSimulator/connectivity/'
+        connectivity_dir = '/projects/VLN-Tutorial/Matterport3DSimulator/connectivity'
         self.batch_size = batch_size
         self.sim = MatterSim.Simulator()
         self.sim.setNavGraphPath(connectivity_dir)

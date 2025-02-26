@@ -1,0 +1,83 @@
+.
+|-- Dockerfile
+|-- LICENSE
+|-- Matterport3DSimulator
+|   |-- CMakeLists.txt
+|   |-- Dockerfile
+|   |-- Doxyfile
+|   |-- LICENSE
+|   |-- README.md
+|   |-- build
+|   |-- cmake
+|   |-- connectivity
+|   |-- data
+|   |-- img_features
+|   |-- include
+|   |-- models
+|   |-- pybind11
+|   |-- scripts
+|   |-- sim_imgs
+|   |-- src
+|   |-- tasks
+|   |-- teaser.jpg
+|   |-- web
+|   `-- webgl_imgs
+|-- README.md
+|-- duet
+    |-- README.md
+    |-- datasets
+    |   |-- Matterport3D
+    |   |   |-- v1_unzip_scans
+    |   |   `-- v1_zip_scans
+    |   |-- R2R
+    |   |   |-- annotations
+    |   |   |-- connectivity
+    |   |   |-- exprs_map
+    |   |   |-- features
+    |   |   |-- results_for_visualization
+    |   |   `-- trained_models
+    |   |-- R4R
+    |   |   |-- annotations
+    |   |   `-- trained_models
+    |   |-- REVERIE
+    |   |   |-- annotations
+    |   |   |-- features
+    |   |   `-- trained_models
+    |   |-- SOON
+    |   |   |-- annotations
+    |   |   |-- features
+    |   |   `-- trained_models
+    |   `-- pretrained
+    |       `-- LXMERT
+    |-- install.bash
+|   |-- map_nav_src
+|   |-- preprocess
+|   `-- pretrain_src
+|-- scripts
+|   |-- download.sh
+|   `-- download_mp3d.py
+|-- seq2seq
+|   |-- README.md
+|   |-- __pycache__
+|   |-- agent.py
+|   |-- data
+        |-- R2R_test.json
+        |-- R2R_train.json
+        |-- R2R_val_seen.json
+        |-- R2R_val_unseen.json
+        |-- img_features
+        |   `-- ResNet-152-imagenet.tsv
+        |-- train_vocab.txt
+        `-- trainval_vocab.txt
+|   |-- eval.py
+|   |-- model.py
+|   |-- plot.py
+|   |-- plots
+|   |-- requirements.txt
+|   |-- results
+|   |-- snapshots
+|   |-- train.py
+|   `-- utils.py
+|-- tmp
+`-- tutorial
+    `-- MatterSim_Tutorial.md

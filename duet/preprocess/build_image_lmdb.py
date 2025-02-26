@@ -9,7 +9,7 @@ import lmdb
 import math
 import imageio
 
-sys.path.append('codes/Matterport3DSimulator/build/')
+# sys.path.append('/projects/VLN-Tutorial/Matterport3DSimulator/build')
 import MatterSim
 
 # Add this near the top of the file after imports
@@ -20,9 +20,10 @@ if not os.path.exists('tmp'):
 WIDTH = 640
 HEIGHT = 480
 VFOV = 60
+DEBUG = False
 
-scan_data_dir = '/projects/VLN-DUET/datasets/Matterport3D/v1_unzip_scans'
-connectivity_dir = '/projects/VLN-DUET/datasets/R2R/connectivity'
+scan_data_dir = '/projects/VLN-Tutorial/duet/datasets/Matterport3D/v1_unzip_scans'
+connectivity_dir = '/projects/VLN-Tutorial/duet/datasets/R2R/connectivity'
 
 sim = MatterSim.Simulator()
 sim.setDatasetPath(scan_data_dir)
@@ -82,9 +83,10 @@ for i, viewpoint_id in enumerate(viewpoint_ids):
         image = image.resize((NEWWIDTH, NEWHEIGHT), Image.Resampling.LANCZOS)
         image = np.array(image)
         images.append(image)
-        # Save the combined image array
-        save_path = os.path.join('tmp', f'{scan}_{vp}_{ix}.png')
-        imageio.imwrite(save_path, image)
+        if DEBUG:   
+            # Save the combined image array
+            save_path = os.path.join('tmp', f'{scan}_{vp}_{ix}.png')
+            imageio.imwrite(save_path, image)
     images = np.stack(images, 0)
     
     txn.put(key_byte, images)

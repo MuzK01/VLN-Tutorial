@@ -18,13 +18,13 @@ from agent import Seq2SeqAgent
 from eval import Evaluation
 
 
-TRAIN_VOCAB = 'tasks/R2R/data/train_vocab.txt'
-TRAINVAL_VOCAB = 'tasks/R2R/data/trainval_vocab.txt'
-RESULT_DIR = 'tasks/R2R/results/'
-SNAPSHOT_DIR = 'tasks/R2R/snapshots/'
-PLOT_DIR = 'tasks/R2R/plots/'
+TRAIN_VOCAB = 'seq2seq/data/train_vocab.txt'
+TRAINVAL_VOCAB = 'seq2seq/data/trainval_vocab.txt'
+RESULT_DIR = 'seq2seq/results/'
+SNAPSHOT_DIR = 'seq2seq/snapshots/'
+PLOT_DIR = 'seq2seq/plots/'
 
-IMAGENET_FEATURES = 'img_features/ResNet-152-imagenet.tsv'
+IMAGENET_FEATURES = 'seq2seq/data/img_features/ResNet-152-imagenet.tsv'
 MAX_INPUT_LENGTH = 80
 
 features = IMAGENET_FEATURES

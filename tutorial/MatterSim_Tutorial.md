@@ -59,7 +59,7 @@ docker run -it --gpus all \
     --device=/dev/video* \
     -e DISPLAY=$DISPLAY \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
-    -v /absolute/path/to/VLN-Tutorial:/VLN-Tutorial \
+    -v /absolute/path/to/VLN-Tutorial:/projects/VLN-Tutorial \
     mattersim:v1
 ```
 
@@ -96,14 +96,15 @@ sudo apt-get install libjsoncpp-dev libepoxy-dev libglm-dev libosmesa6 libosmesa
 ```
 
 ## 3. Building MatterSim Package
-
+Note that the code of Matterport3DSimulator is modifed to fit to new linux verions: specifcally, docker image version ubuntu 20.04+cuda 11.2. It is different from the original code. But it is possible to still work for other versions.
 ```bash
-cd /VLN-Tutorial/Matterport3DSimulator
+ln -sf /usr/bin/python3 /usr/bin/python
+cd /projects/VLN-Tutorial/Matterport3DSimulator
 mkdir build && cd build
-PYTHON=$(which python)
+which python #check python is available
 cmake -DEGL_RENDERING=ON ..
 make
-cd ../
+cd ../../
 ```
 
 ### 3.1 Rendering Options
@@ -114,10 +115,16 @@ cd ../
 ### 3.2 Configure PYTHONPATH
 ```bash
 # Temporary setup
-export PYTHONPATH=/VLN-Tutorial/Matterport3DSimulator/build:$PYTHONPATH
+export PYTHONPATH=/projects/VLN-Tutorial/Matterport3DSimulator/build:$PYTHONPATH
 
 # Permanent setup (add to ~/.bashrc)
-echo "export PYTHONPATH=/VLN-Tutorial/Matterport3DSimulator/build:\$PYTHONPATH" >> ~/.bashrc
+echo "export PYTHONPATH=/projects/VLN-Tutorial/Matterport3DSimulator/build:\$PYTHONPATH" >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 3.3 Set EGL_PLATFORM
+```bash
+echo "export EGL_PLATFORM=device" >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -128,9 +135,25 @@ python -c "import MatterSim; print('Import MatterSim successfully')"
 
 ## 4. Using MatterSim
 
-### 4.1 Run Demo
+### 4.1 Run Eval
 ```bash
-python R2R_benchmark/eval.py
+python seq2seq/eval.py
+```
+
+### 4.2 Run training
+
+1. Download the preprocessed image features 
+In our initial work using this simulator, we discretized heading and elevation into 30 degree increments, and precomputed image features for each view. Now that the simulator is much faster, this is no longer necessary, but for completeness we include the details of this setting below.
+
+We generate image features using Caffe. To replicate our approach, first download and save some Caffe ResNet-152 weights into the `models` directory. We experiment with weights pretrained on [ImageNet](https://github.com/KaimingHe/deep-residual-networks), and also weights finetuned on the [Places365](https://github.com/CSAILVision/places365) dataset. The script `scripts/precompute_features.py` can then be used to precompute ResNet-152 features. Features are saved in tsv format in the `img_features` directory. 
+
+Alternatively, skip the generation and just download and extract our tsv files into the `img_features` directory:
+- [ResNet-152-imagenet features [380K/2.9GB]](https://www.dropbox.com/s/o57kxh2mn5rkx4o/ResNet-152-imagenet.zip?dl=1)
+- [ResNet-152-places365 features [380K/2.9GB]](https://www.dropbox.com/s/85tpa6tc3enl5ud/ResNet-152-places365.zip?dl=1)
+
+2. Run the training script
+```bash
+python seq2seq/train.py
 ```
 
 ### 4.2 Homework: Check these functions for more details
@@ -187,3 +210,18 @@ warning: 'int PyThread_set_key_value(int, void*)' is deprecated [-Wdeprecated-de
 ```
 
 This warning occurs due to the use of a deprecated Python API function in pybind11, but it does not affect the functionality of the simulator.
+
+### 5.3 MatterSim: Could not open list of scans at "***"
+
+```bash
+#modify line 51 in seq2seq/env.py to the correct path
+connectivity_dir = '/projects/VLN-Tutorial/Matterport3DSimulator/connectivity'
+```
+
+### 5.4 RuntimeError: cuDNN version incompatibility: PyTorch was compiled  against (8, 3, 2) but found runtime version (8, 2, 1)
+
+```bash
+## just unset the LD_LIBRARY_PATH
+unset LD_LIBRARY_PATH
+```
+

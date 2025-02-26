@@ -106,7 +106,7 @@ class Evaluation(object):
         return score_summary, self.scores
 
 
-RESULT_DIR = 'R2R_benchmark/results/'
+RESULT_DIR = 'seq2seq/results/'
 
 def eval_simple_agents():
     ''' Run simple baselines on each split. '''
