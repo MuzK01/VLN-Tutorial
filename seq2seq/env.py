@@ -15,12 +15,14 @@ from utils import load_datasets, load_nav_graphs
 
 csv.field_size_limit(sys.maxsize)
 
+scan_dir = '/projects/VLN-Tutorial/duet/datasets/Matterport3D/v1_unzip_scans'
+connectivity_dir = '/projects/VLN-Tutorial/Matterport3DSimulator/connectivity'
 
 class EnvBatch():
     ''' A simple wrapper for a batch of MatterSim environments,
         using discretized viewpoints and pretrained features '''
 
-    def __init__(self, feature_store=None, batch_size=100):
+    def __init__(self, feature_store=None, enable_depth=False, batch_size=100):
         if feature_store:
             print('Loading image features from %s' % feature_store)
             tsv_fieldnames = ['scanId', 'viewpointId', 'image_w','image_h', 'vfov', 'features']
@@ -40,11 +42,16 @@ class EnvBatch():
             self.image_w = 640
             self.image_h = 480
             self.vfov = 60
-        connectivity_dir = '/projects/VLN-Tutorial/Matterport3DSimulator/connectivity'
+
+        enable_rendering = True if not feature_store else False
+        enable_depth = enable_depth if not feature_store else False
+
         self.batch_size = batch_size
         self.sim = MatterSim.Simulator()
         self.sim.setNavGraphPath(connectivity_dir)
-        self.sim.setRenderingEnabled(False)
+        self.sim.setDatasetPath(scan_dir)
+        self.sim.setDepthEnabled(enable_depth)
+        self.sim.setRenderingEnabled(enable_rendering)
         self.sim.setDiscretizedViewingAngles(True)
         self.sim.setBatchSize(self.batch_size)
         self.sim.setCameraResolution(self.image_w, self.image_h)
@@ -106,8 +113,9 @@ class EnvBatch():
 class R2RBatch():
     ''' Implements the Room to Room navigation task, using discretized viewpoints and pretrained features '''
 
-    def __init__(self, feature_store, batch_size=100, seed=10, splits=['train'], tokenizer=None):
-        self.env = EnvBatch(feature_store=feature_store, batch_size=batch_size)
+    def __init__(self, feature_store, enable_depth=False, batch_size=100, seed=10, splits=['train'], tokenizer=None):
+        self.feature_store = feature_store
+        self.env = EnvBatch(feature_store=feature_store, enable_depth=enable_depth, batch_size=batch_size)
         self.data = []
         self.scans = []
         for item in load_datasets(splits):
@@ -210,6 +218,9 @@ class R2RBatch():
                 'instructions' : item['instructions'],
                 'teacher' : self._shortest_path_action(state, item['path'][-1]),
             })
+            if not self.feature_store:
+                obs[-1]['rgb'] = np.array(state.rgb)
+                obs[-1]['depth'] = np.array(state.depth)
             if 'instr_encoding' in item:
                 obs[-1]['instr_encoding'] = item['instr_encoding']
         return obs

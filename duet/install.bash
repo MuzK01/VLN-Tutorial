@@ -10,4 +10,6 @@ pip install line_profiler
 pip install lmdb
 pip install imageio
 pip install matplotlib
-apt update & apt install tree tmux
+pip install selenium
+pip install opencv-python
+apt update && apt install tree tmux
