@@ -19,10 +19,10 @@ cd VLN-Tutorial
 ### 1.2 Download MP3D Dataset
 ```bash
 # Download a single test scene
-python py3_download_mp.py -o data --id mJXqzFtmKg4
+python scripts/download_mp3d.py -o data --id mJXqzFtmKg4
 
 # Download the complete dataset (1.3TB)
-python py3_download_mp.py -o data
+python scripts/download_mp3d.py -o data
 ```
 
 ### 1.3 Download R2R Dataset
