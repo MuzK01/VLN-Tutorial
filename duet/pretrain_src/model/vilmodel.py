@@ -526,15 +526,32 @@ class ImageEmbeddings(nn.Module):
         return split_traj_embeds, split_traj_vp_lens
         
 class LocalVPEncoder(nn.Module):
+    """
+    局部视点编码器 - 处理智能体当前位置的详细视觉观察
+    该模块关注当前视点的局部细节，编码智能体能看到的全景视图和可导航方向
+    """
     def __init__(self, config):
+        """
+        初始化局部视点编码器
+        
+        参数:
+        - config: 模型配置，包含隐藏层大小等参数
+        """
         super().__init__()
+        # 位置嵌入网络：将视点的位置特征转换为隐藏表示
         self.vp_pos_embeddings = nn.Sequential(
             nn.Linear(config.angle_feat_size*2 + 6, config.hidden_size),
             BertLayerNorm(config.hidden_size, eps=1e-12)
         )
+        # 跨模态编码器：融合文本指令和视觉观察
         self.encoder = CrossmodalEncoder(config)
 
     def vp_input_embedding(self, split_traj_embeds, split_traj_vp_lens, vp_pos_fts):
+        """
+        构建局部视点的输入嵌入
+        
+        将视觉特征和位置特征整合为完整的视点表示
+        """
         vp_img_embeds = pad_tensors_wgrad([x[-1] for x in split_traj_embeds])
         vp_lens = torch.stack([x[-1]+1 for x in split_traj_vp_lens], 0)
         vp_masks = gen_seq_masks(vp_lens)
@@ -553,6 +570,14 @@ class LocalVPEncoder(nn.Module):
     def forward(
         self, txt_embeds, txt_masks, split_traj_embeds, split_traj_vp_lens, vp_pos_fts
     ):
+        """
+        前向传播：处理局部视点表示并融合文本信息
+        
+        过程:
+        1. 构建局部视点嵌入（视觉特征+位置特征）
+        2. 使用跨模态编码器融合文本指令和视点表示
+        """
+        # 构建局部视点嵌入
         vp_embeds, vp_masks = self.vp_input_embedding(
             split_traj_embeds, split_traj_vp_lens, vp_pos_fts
         )
@@ -560,50 +585,90 @@ class LocalVPEncoder(nn.Module):
         return vp_embeds
 
 class GlobalMapEncoder(nn.Module):
+    """
+    全局地图编码器 - 处理和编码整个导航环境的全局地图表示
+    这个模块负责将离散的视点整合为一个连贯的环境表示，并融合文本指令信息
+    """
     def __init__(self, config):
+        """
+        初始化全局地图编码器
+        
+        参数:
+        - config: 模型配置，包含隐藏层大小等参数
+        """
         super().__init__()
+        # 位置嵌入网络：将视点的空间位置特征（角度+距离）转换为隐藏表示
         self.gmap_pos_embeddings = nn.Sequential(
-            nn.Linear(config.angle_feat_size + 3, config.hidden_size),
-            BertLayerNorm(config.hidden_size, eps=1e-12)
+            nn.Linear(config.angle_feat_size + 3, config.hidden_size),  # 角度特征+3维距离特征
+            BertLayerNorm(config.hidden_size, eps=1e-12)  # 标准化层，确保特征分布稳定
         )
+        # 步骤嵌入：编码视点在轨迹中的访问顺序
         self.gmap_step_embeddings = nn.Embedding(config.max_action_steps, config.hidden_size)
+        # 跨模态编码器：融合文本和视觉信息
         self.encoder = CrossmodalEncoder(config)
         
+        # 空间关系处理：可选地处理视点间的空间关系（比如距离）
         if config.graph_sprels:
-            self.sprel_linear = nn.Linear(1, 1)
+            self.sprel_linear = nn.Linear(1, 1)  # 将距离信息映射为注意力权重
         else:
             self.sprel_linear = None
 
     def _aggregate_gmap_features(
         self, split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids
     ):
+        """
+        聚合轨迹特征到全局地图节点
+        
+        主要功能：
+        - 将轨迹中的视点特征映射到全局地图对应的节点
+        - 区分已访问和未访问的视点，并进行不同的特征聚合
+        """
         batch_size = len(split_traj_embeds)
         device = split_traj_embeds[0].device
 
         batch_gmap_img_fts = []
-        for i in range(batch_size):
+        for i in range(batch_size):  # 对批次中的每个样本处理
+            # 分别存储已访问和未访问视点的特征
             visited_vp_fts, unvisited_vp_fts = {}, {}
+            
+            # 创建视点掩码并提取有效特征
             vp_masks = gen_seq_masks(split_traj_vp_lens[i])
             max_vp_len = max(split_traj_vp_lens[i])
+            #i_traj_embeds 是当前样本的轨迹特征，维度为 (traj_len, max_vp_len, hidden_size)
             i_traj_embeds = split_traj_embeds[i][:, :max_vp_len] * vp_masks.unsqueeze(2)
+            
+            # 处理已访问的视点：取每个视点所有特征的平均
             for t in range(len(split_traj_embeds[i])):
+                #t 代表在当前轨迹中的第几步， i是当前样本在batch中的位置
+                # 已访问视点：取该视点所有观察角度特征的平均
                 visited_vp_fts[traj_vpids[i][t]] = torch.sum(i_traj_embeds[t], 0) / split_traj_vp_lens[i][t]
+                # 收集未访问但可见的视点特征
+                # traj_cand_vpids包含了在每一步的候选视点信息
                 for j, vp in enumerate(traj_cand_vpids[i][t]):
+                    # 如果候选视点vp没有被访问过，则将其添加到unvisited_vp_fts中
                     if vp not in visited_vp_fts:
                         unvisited_vp_fts.setdefault(vp, [])
+                        # 将当前步的特征添加到候选视点的列表中
+                        # 注意这里i_traj_embeds包含了环境里所有视点的特征，其排序是按和当前视点的距离排序的
+                        # 而traj_cand_vpids中的序号和i_traj_embeds的排序方法是一致的
+                        # 所以这里直接根据j作为序号取i_traj_embeds中的特征即可
                         unvisited_vp_fts[vp].append(i_traj_embeds[t][j])
 
+            # 为全局地图中的每个视点构建特征
             gmap_img_fts = []
-            for vp in gmap_vpids[i][1:]:
+            for vp in gmap_vpids[i][1:]:  # 跳过[stop]标记
                 if vp in visited_vp_fts:
+                    # 已访问视点：使用访问时的特征
                     gmap_img_fts.append(visited_vp_fts[vp])
                 else:
+                    # 未访问视点：使用所有观察到该视点的特征平均值
                     gmap_img_fts.append(torch.mean(torch.stack(unvisited_vp_fts[vp], 0), 0))
             gmap_img_fts = torch.stack(gmap_img_fts, 0)
             batch_gmap_img_fts.append(gmap_img_fts)
 
+        # 对批次内的样本进行填充，使它们长度一致
         batch_gmap_img_fts = pad_tensors_wgrad(batch_gmap_img_fts)
-        # add a [stop] token at beginning
+        # 在开头添加[stop]标记
         batch_gmap_img_fts = torch.cat(
             [torch.zeros(batch_size, 1, batch_gmap_img_fts.size(2)).to(device), batch_gmap_img_fts], 
             dim=1
@@ -614,12 +679,23 @@ class GlobalMapEncoder(nn.Module):
         self, split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
         gmap_step_ids, gmap_pos_fts, gmap_lens
     ):
+        """
+        构建全局地图的输入嵌入
+        
+        整合三种信息:
+        1. 视觉特征：从轨迹中聚合的视觉表示
+        2. 步骤信息：视点在轨迹中的访问顺序
+        3. 位置信息：视点的空间位置特征
+        """
+        # 聚合视觉特征
         gmap_img_fts = self._aggregate_gmap_features(
             split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids
         )
+        # 组合三种嵌入：视觉特征 + 步骤嵌入 + 位置嵌入
         gmap_embeds = gmap_img_fts + \
                       self.gmap_step_embeddings(gmap_step_ids) + \
                       self.gmap_pos_embeddings(gmap_pos_fts)
+        # 创建掩码，标记有效的地图节点
         gmap_masks = gen_seq_masks(gmap_lens)
         return gmap_embeds, gmap_masks
 
@@ -628,16 +704,29 @@ class GlobalMapEncoder(nn.Module):
         split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
         gmap_step_ids, gmap_pos_fts, gmap_lens, graph_sprels=None
     ):
+        """
+        前向传播：处理全局地图表示并融合文本信息
+        
+        过程:
+        1. 构建全局地图嵌入
+        2. 处理视点间的空间关系（如果启用）
+        3. 使用跨模态编码器融合文本和地图表示
+        """
+        # 构建全局地图嵌入
         gmap_embeds, gmap_masks = self.gmap_input_embedding(
             split_traj_embeds, split_traj_vp_lens, traj_vpids, traj_cand_vpids, gmap_vpids,
             gmap_step_ids, gmap_pos_fts, gmap_lens
         )
         
+        # 处理视点间的空间关系（如距离）
         if self.sprel_linear is not None:
+            # 将距离转换为注意力权重
             graph_sprels = self.sprel_linear(graph_sprels.unsqueeze(3)).squeeze(3).unsqueeze(1)
         else:
             graph_sprels = None
 
+        # 使用跨模态编码器处理文本和地图表示
+        # 文本信息会引导模型关注地图中与导航指令相关的部分
         gmap_embeds = self.encoder(
             txt_embeds, txt_masks, gmap_embeds, gmap_masks,
             graph_sprels=graph_sprels
@@ -667,6 +756,7 @@ class GlocalTextPathCMT(BertPreTrainedModel):
     ):        
         # text embedding
         txt_token_type_ids = torch.zeros_like(txt_ids)
+        #提取文本特征
         txt_embeds = self.embeddings(txt_ids, token_type_ids=txt_token_type_ids)
         txt_masks = gen_seq_masks(txt_lens)
         txt_embeds = self.lang_encoder(txt_embeds, txt_masks)

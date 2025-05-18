@@ -139,10 +139,12 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
         )
 
         # only compute masked tokens for better efficiency
+        #基于txt_embeds预测masked tokens，利用txt_labels != -1来mask
         masked_output = self._compute_masked_hidden(txt_embeds, txt_labels != -1)
         prediction_scores = self.mlm_head(masked_output)
 
         if compute_loss:
+            #txt_labels 作为监督信号计算损失
             mask_loss = F.cross_entropy(
                 prediction_scores, txt_labels[txt_labels != -1], reduction='none'
             )
@@ -161,7 +163,8 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
         traj_step_lens, traj_vp_view_lens, traj_vp_obj_lens, traj_vpids, traj_cand_vpids,
         gmap_lens, gmap_step_ids, gmap_pos_fts, gmap_pair_dists, gmap_vpids, vp_pos_fts,
         vp_view_mrc_masks, vp_view_probs, vp_obj_mrc_masks, vp_obj_probs, compute_loss=True
-    ):
+    ):  
+        #这里 vp_embeds 在单个位置融合了所有视角的信息的表征， 已经完成视觉和语言的交叉注意力计算
         _, vp_embeds = self.bert(
             txt_ids, txt_lens, traj_view_img_fts, traj_obj_img_fts, traj_loc_fts, traj_nav_types, 
             traj_step_lens, traj_vp_view_lens, traj_vp_obj_lens, traj_vpids, traj_cand_vpids,
@@ -176,6 +179,7 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
         # vp_view_mrc_masks = vp_view_mrc_masks[:, :vp_view_embeds.size(1)]
         
         # only compute masked regions for better efficient=cy
+        #基于vp_view_embeds预测masked regions，利用vp_view_mrc_masks来mask
         view_masked_output = self._compute_masked_hidden(vp_view_embeds, vp_view_mrc_masks)
         view_prediction_soft_labels = self.image_classifier(view_masked_output)
         view_mrc_targets = self._compute_masked_hidden(vp_view_probs, vp_view_mrc_masks)
@@ -196,6 +200,7 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
             obj_prediction_soft_labels, obj_mrc_targets = None, None
 
         if compute_loss:
+            #obj_prediction_soft_labels 作为监督信号计算损失
             view_prediction_soft_labels = F.log_softmax(view_prediction_soft_labels, dim=-1)
             view_mrc_loss = F.kl_div(view_prediction_soft_labels, view_mrc_targets, reduction='none').sum(dim=1)
             if obj_prediction_soft_labels is None:
@@ -216,6 +221,8 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
     ):
         batch_size = txt_ids.size(0)
 
+        #这里 gmap_embeds 是全局地图的表征，已经完成视觉和语言的交叉注意力计算
+        # vp_embeds 是单个位置融合了所有视角的信息的表征， 已经完成视觉和语言的交叉注意力计算
         gmap_embeds, vp_embeds = self.bert(
             txt_ids, txt_lens, traj_view_img_fts, traj_obj_img_fts, traj_loc_fts, traj_nav_types, 
             traj_step_lens, traj_vp_view_lens, traj_vp_obj_lens, traj_vpids, traj_cand_vpids,
@@ -225,14 +232,18 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
         if self.sap_fuse_linear is None:
             fuse_weights = 0.5
         else:
+            # 这个权重用来根据全局动作和局部动作生成最后的动作
+            #这里根据gmap_embeds和vp_embeds作为输入动态生成权重
             fuse_weights = torch.sigmoid(self.sap_fuse_linear(
                 torch.cat([gmap_embeds[:, 0], vp_embeds[:, 0]], 1)
             ))
 
+        # 全局动作预测
         global_logits = self.global_sap_head(gmap_embeds).squeeze(2) * fuse_weights
         global_logits.masked_fill_(gmap_visited_masks, -float('inf'))
         global_logits.masked_fill_(gen_seq_masks(gmap_lens).logical_not(), -float('inf'))
 
+        # 局部动作预测
         local_logits = self.local_sap_head(vp_embeds).squeeze(2) * (1 - fuse_weights)
         vp_nav_masks = pad_tensors_wgrad(
             [x[-1]!=1 for x in torch.split(traj_nav_types, traj_step_lens)]
@@ -262,8 +273,14 @@ class GlocalTextPathCMTPreTraining(BertPreTrainedModel):
                         fused_logits[i, j] += bw_logits
 
         if compute_loss:
+            # 全局动作预测损失
             global_losses = F.cross_entropy(global_logits, global_act_labels, reduction='none')
+            # 局部动作预测损失
             local_losses = F.cross_entropy(local_logits, local_act_labels, reduction='none')
+            # 融合动作预测损失
+            # 在teacher- forcing模式下全局动作和局部动作的标签是相同的
+            # 为什么？
+            # 因为始终在正确轨迹上，不需要回退到其他地方
             fused_losses = F.cross_entropy(fused_logits, global_act_labels, reduction='none')
             losses = global_losses + local_losses + fused_losses
             return losses

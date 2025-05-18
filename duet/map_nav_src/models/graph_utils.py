@@ -104,6 +104,7 @@ class GraphMap(object):
         self.node_step_ids = {}
 
     def update_graph(self, ob):
+        #根据观测构建当前的场景地图
         self.node_positions[ob['viewpoint']] = ob['position']
         for cc in ob['candidate']:
             self.node_positions[cc['viewpointId']] = cc['position']

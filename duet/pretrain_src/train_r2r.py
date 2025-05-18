@@ -39,15 +39,33 @@ from model.pretrain_cmt import GlocalTextPathCMTPreTraining
 def create_dataloaders(
     data_cfg, nav_db, tok, is_train: bool, device: torch.device, opts
 ):
+    """
+    创建数据加载器
+    
+    参数：
+    - data_cfg: 数据配置
+    - nav_db: 导航数据库
+    - tok: 分词器
+    - is_train: 是否为训练模式
+    - device: 设备
+    - opts: 命令行参数
+    
+    返回：
+    - dataloaders: 任务数据加载器的字典
+    """
     dataloaders = {}
     for k, task_name in enumerate(data_cfg.tasks):
+        # 根据任务类型创建相应的数据集
         if task_name == 'mlm':
+            # MLM(掩码语言模型)任务 - 预测被掩码的文本单词
             task_dataset = MlmDataset(nav_db, tok)
             task_collate_fn = mlm_collate
         elif task_name == 'mrc':
+            # MRC(掩码区域分类)任务 - 预测被掩码的图像区域
             task_dataset = MrcDataset(nav_db, tok, opts.mrc_mask_prob, end_vp_pos_ratio=0.2)
             task_collate_fn = mrc_collate
         elif task_name == 'sap':
+            # SAP(行为预测)任务 - 预测下一步导航行为
             task_dataset = SapDataset(nav_db, tok, end_vp_pos_ratio=0.2)
             task_collate_fn = sap_collate
         else:
@@ -55,10 +73,12 @@ def create_dataloaders(
 
         LOGGER.info(f"{task_name}: {len(task_dataset)} samples loaded")
 
+        # 创建数据加载器
         task_loader, pre_epoch = build_dataloader(
             task_name, task_dataset, task_collate_fn, is_train, opts
         )
 
+        # 训练模式下，需要记录任务的混合比例
         if is_train:
             ratio = data_cfg.mix_ratio[k]
             dataloaders[task_name] = (task_loader, ratio, pre_epoch)
@@ -68,6 +88,13 @@ def create_dataloaders(
 
 
 def main(opts):
+    """
+    主函数：设置环境，创建模型和数据加载器，执行训练和验证
+    
+    参数：
+    - opts: 命令行参数
+    """
+    # 设置CUDA环境
     default_gpu, n_gpu, device = set_cuda(opts)
 
     if default_gpu:
@@ -77,11 +104,13 @@ def main(opts):
             )
         )
  
+    # 设置随机种子
     seed = opts.seed
     if opts.local_rank != -1:
         seed += opts.rank
     set_random_seed(seed)
 
+    # 设置日志和模型保存器
     if default_gpu:
         save_training_meta(opts)
         TB_LOGGER.create(os.path.join(opts.output_dir, 'logs'))
@@ -93,33 +122,38 @@ def main(opts):
         pbar = NoOp()
         model_saver = NoOp()
 
-    # Model config
+    # 加载模型配置
+    # 模型配置，包含预训练任务列表
     model_config = PretrainedConfig.from_json_file(opts.model_config)
     model_config.pretrain_tasks = []
     for train_dataset_config in opts.train_datasets.values():
         model_config.pretrain_tasks.extend(train_dataset_config['tasks'])
     model_config.pretrain_tasks = set(model_config.pretrain_tasks)
 
+    # 创建分词器
     tokenizer = AutoTokenizer.from_pretrained(model_config.lang_bert_name)
 
-    # Prepare model
+    # 准备模型 - 从检查点加载或使用预训练模型初始化
     if opts.checkpoint:
         checkpoint = torch.load(opts.checkpoint, map_location=lambda storage, loc: storage)
     else:
         checkpoint = {}
         if opts.init_pretrained == 'bert':
+            # 使用BERT模型初始化
             tmp = AutoModel.from_pretrained(model_config.lang_bert_name)
             for param_name, param in tmp.named_parameters():
                 checkpoint[param_name] = param
             if model_config.lang_bert_name == 'xlm-roberta-base':
                 # embeddings.token_type_embeddings.weight (1 -> 2, the second is for image embedding)
+                # 扩展token_type嵌入以支持图像嵌入
                 checkpoint['embeddings.token_type_embeddings.weight'] = torch.cat(
                     [checkpoint['embeddings.token_type_embeddings.weight']] * 2, 0
                 )
             del tmp
         elif opts.init_pretrained == 'lxmert':
+            # 使用LXMERT模型初始化（一种多模态预训练模型）
             tmp = torch.load(
-                '../datasets/pretrained/LXMERT/model_LXRT.pth', 
+                'duet/datasets/pretrained/LXMERT/model_LXRT.pth', 
                 map_location=lambda storage, loc: storage
             )
             for param_name, param in tmp.items():
@@ -138,9 +172,10 @@ def main(opts):
                     checkpoint[param_name] = param
             del tmp
     
+    # 定义模型类
     model_class = GlocalTextPathCMTPreTraining
     
-    # update some training configs
+    # 创建模型
     model = model_class.from_pretrained(
         pretrained_model_name_or_path=None, config=model_config, state_dict=checkpoint
     )
@@ -149,8 +184,23 @@ def main(opts):
     model = wrap_model(model, device, opts.local_rank)
     del checkpoint
     
-    # load data training set
+    # 加载训练数据集
+    # R2R(Room-to-Room)数据集，用于视觉语言导航
     data_cfg = EasyDict(opts.train_datasets['R2R'])
+    # 数据集信息
+    # data_cfg.train_traj_files： 存储了轨迹文件路径
+    # data_cfg.img_ft_file： 存储了图像特征文件路径
+    # data_cfg.scanvp_cands_file： 存储了扫描视图候选文件路径
+    # data_cfg.connectivity_dir： 存储了连接性文件路径
+    # scanvp_cands_file 数据格式
+    #     "scan_id_viewpoint_id": {
+    #     "connected_viewpoint_id": [
+    #         viewpoint_index,     // Index of the view (0-35) showing this connection
+    #         relative_angle_dist, // Distance in terms of relative angle 
+    #         relative_heading,    // Relative heading angle to target viewpoint
+    #         relative_elevation   // Relative elevation angle to target viewpoint
+    #     ],
+
     train_nav_db = R2RTextPathData(
         data_cfg.train_traj_files, data_cfg.img_ft_file,
         data_cfg.scanvp_cands_file, data_cfg.connectivity_dir,
@@ -176,16 +226,20 @@ def main(opts):
         max_txt_len=opts.max_txt_len, in_memory=True
     )
 
-    # Build data loaders
+    # 创建数据加载器
+    # 训练数据加载器
     train_dataloaders = create_dataloaders(
         data_cfg, train_nav_db, tokenizer, True, device, opts
     )
+    # 验证数据加载器（已见过的环境）
     val_dataloaders = create_dataloaders(
         data_cfg, val_nav_db, tokenizer, False, device, opts
     )
+    # 验证数据加载器（未见过的环境）
     val2_dataloaders = create_dataloaders(
         data_cfg, val2_nav_db, tokenizer, False, device, opts
     )
+    # 元加载器 - 管理多个任务的数据加载器
     meta_loader = MetaLoader(
         train_dataloaders,
         accum_steps=opts.gradient_accumulation_steps,
@@ -194,20 +248,22 @@ def main(opts):
     )
     meta_loader = PrefetchLoader(meta_loader, device)
 
-    # Prepare optimizer
+    # 准备优化器
     optimizer = build_optimizer(model, opts)
     task2scaler = {t: i for i, t in enumerate(train_dataloaders.keys())}
 
+    # 设置混合精度训练
     if opts.fp16:
         grad_scaler = amp.GradScaler()
 
+    # 开始训练
     global_step = 0
     LOGGER.info(f"***** Running training with {opts.world_size} GPUs *****")
     LOGGER.info("  Batch size = %d", opts.train_batch_size if opts.local_rank == -1 else opts.train_batch_size * opts.world_size)
     LOGGER.info("  Accumulate steps = %d", opts.gradient_accumulation_steps)
     LOGGER.info("  Num steps = %d", opts.num_train_steps)
 
-    # to compute training statistics
+    # 用于计算训练统计信息的变量
     task2loss = {task: RunningMeter(f'loss/{task}')
                  for task in train_dataloaders.keys()}
 
@@ -217,18 +273,18 @@ def main(opts):
     grad_norm = 0
 
     start_time = time.time()
-    # quick hack for amp delay_unscale bug
+    # 混合精度训练的快速处理
     optimizer.zero_grad()
     optimizer.step()
+    
+    # 主训练循环
     for step, (name, batch) in enumerate(meta_loader):
-        # forward pass
+        # 前向传播
         n_examples[name] += batch['txt_ids'].size(0)
         n_in_units[name] += batch['txt_lens'].sum().item()
         task = name.split('_')[0]
-        # print(name, task)
-        # for k, v in batch.items():
-        #     print(k, v.size())
-        # continue
+        
+        # 计算损失
         if opts.fp16:
             with amp.autocast():
                 loss = model(batch, task=task, compute_loss=True)
@@ -236,10 +292,10 @@ def main(opts):
             loss = model(batch, task=task, compute_loss=True)
 
         n_loss_units[name] += loss.size(0)
-        loss = loss.mean()  # loss is not normalized in model
+        loss = loss.mean()  # 损失未在模型中归一化
 
-        # backward pass
-        if args.gradient_accumulation_steps > 1: # average loss 
+        # 反向传播
+        if args.gradient_accumulation_steps > 1: # 平均损失
             loss = loss / args.gradient_accumulation_steps
 
         delay_unscale = (step+1) % opts.gradient_accumulation_steps != 0
@@ -250,35 +306,29 @@ def main(opts):
 
         task2loss[name](loss.item())
 
-        # optimizer update and logging
+        # 优化器更新和日志记录
         if (step + 1) % opts.gradient_accumulation_steps == 0:
             global_step += 1
 
-            # learning rate scheduling
+            # 学习率调度
             lr_this_step = get_lr_sched(global_step, opts)
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr_this_step
             TB_LOGGER.add_scalar('lr', lr_this_step, global_step)
 
-            # log loss
-            # NOTE: not gathered across GPUs for efficiency
+            # 记录损失
             TB_LOGGER.log_scalar_dict({ll.name: ll.val
                                        for ll in task2loss.values()
                                        if ll.val is not None})
             TB_LOGGER.step()
 
-            # update model params
+            # 更新模型参数
             if opts.grad_norm != -1:
                 if opts.fp16:
                     grad_scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), opts.grad_norm
                 )
-                # print(step, name, grad_norm)
-                # for k, v in model.named_parameters():
-                #     if v.grad is not None:
-                #         v = torch.norm(v).data.item()
-                #         print(k, v)
                 TB_LOGGER.add_scalar('grad_norm', grad_norm, global_step)
             if opts.fp16:
                 grad_scaler.step(optimizer)
@@ -288,8 +338,9 @@ def main(opts):
             optimizer.zero_grad()
             pbar.update(1)
 
+            # 定期记录训练进度
             if global_step % opts.log_steps == 0:
-                # monitor training throughput
+                # 监控训练吞吐量
                 LOGGER.info(f'==============Step {global_step}===============')
                 for t in train_dataloaders.keys():
                     tot_ex = n_examples[t]
@@ -308,14 +359,19 @@ def main(opts):
                                          global_step)
                 LOGGER.info('===============================================')
 
+            # 定期执行验证
             if global_step % opts.valid_steps == 0:
                 LOGGER.info(f'------Step {global_step}: start validation seen------')
                 validate(model, val_dataloaders, setname='_seen')
                 LOGGER.info(f'------Step {global_step}: start validation unseen------')
                 validate(model, val2_dataloaders, setname='_unseen')
                 model_saver.save(model, global_step)
+        
+        # 达到指定步数后结束训练
         if global_step >= opts.num_train_steps:
             break
+            
+    # 训练结束后进行最后一次验证并保存模型
     if global_step % opts.valid_steps != 0:
         LOGGER.info(f'------Step {global_step}: start validation seen------')
         validate(model, val_dataloaders, setname='_seen')
@@ -325,9 +381,18 @@ def main(opts):
 
 
 def validate(model, val_dataloaders, setname=''):
+    """
+    在验证集上评估模型性能
+    
+    参数：
+    - model: 模型
+    - val_dataloaders: 验证数据加载器
+    - setname: 数据集名称后缀（'_seen'或'_unseen'）
+    """
     model.eval()
     for task, loader in val_dataloaders.items():
         LOGGER.info(f"validate val{setname} on {task} task")
+        # 针对不同任务调用不同的验证函数
         if task.startswith('mlm'):
             val_log = validate_mlm(model, loader)
         elif task.startswith('mrc'):
@@ -336,6 +401,7 @@ def validate(model, val_dataloaders, setname=''):
             val_log = validate_sap(model, loader)
         else:
             raise ValueError(f'Undefined task {task}')
+        # 记录验证指标
         val_log = {f'val{setname}_{task}_{k}': v for k, v in val_log.items()}
         TB_LOGGER.log_scalar_dict(
             {f'valid{setname}_{task}/{k}': v for k, v in val_log.items()}
@@ -345,6 +411,11 @@ def validate(model, val_dataloaders, setname=''):
 
 @torch.no_grad()
 def validate_mlm(model, val_loader):
+    """
+    验证MLM任务（掩码语言模型）
+    
+    计算预测被掩码词的准确率
+    """
     LOGGER.info("start running MLM validation...")
     val_loss = 0
     n_correct = 0
@@ -358,6 +429,7 @@ def validate_mlm(model, val_loader):
         val_loss += loss.item()
         n_correct += (scores.max(dim=-1)[1] == labels).sum().item()
         n_word += labels.numel()
+    # 汇总分布式训练结果
     val_loss = sum(all_gather(val_loss))
     n_correct = sum(all_gather(n_correct))
     n_word = sum(all_gather(n_word))
@@ -372,6 +444,9 @@ def validate_mlm(model, val_loader):
     return val_log
 
 def compute_accuracy_for_soft_targets(out, labels):
+    """
+    计算软目标（概率分布）的准确率
+    """
     outputs = out.max(dim=-1)[1]
     labels = labels.max(dim=-1)[1]  # argmax
     n_correct = (outputs == labels).sum().item()
@@ -379,6 +454,11 @@ def compute_accuracy_for_soft_targets(out, labels):
 
 @torch.no_grad()
 def validate_mrc(model, val_loader):
+    """
+    验证MRC任务（掩码区域分类）
+    
+    计算预测被掩码图像区域的准确率
+    """
     LOGGER.info("start running MRC validation...")
     val_loss = 0
     n_feat = 0
@@ -391,6 +471,7 @@ def validate_mrc(model, val_loader):
         tot_score += compute_accuracy_for_soft_targets(view_logits, view_targets)
         val_loss += loss.item()
         n_feat += batch['vp_view_mrc_masks'].sum().item()
+    # 汇总分布式训练结果
     val_loss = sum(all_gather(val_loss))
     tot_score = sum(all_gather(tot_score))
     n_feat = sum(all_gather(n_feat))
@@ -406,22 +487,31 @@ def validate_mrc(model, val_loader):
     
 @torch.no_grad()
 def validate_sap(model, val_loader):
+    """
+    验证SAP任务（行为预测）
+    
+    计算预测下一步导航行为的准确率
+    """
     LOGGER.info("start running SAP validation...")
     val_gloss, val_lloss, val_floss = 0, 0, 0
     n_gcorrect, n_lcorrect, n_fcorrect = 0, 0, 0
     n_data = 0
     st = time.time()
     for i, batch in enumerate(val_loader):
+        # 获取全局、局部和融合的预测结果
         global_logits, local_logits, fused_logits, global_act_labels, local_act_labels = \
             model(batch, task='sap', compute_loss=False)
+        # 计算损失
         val_gloss += F.cross_entropy(global_logits, global_act_labels, reduction='sum').data.item()
         val_lloss += F.cross_entropy(local_logits, local_act_labels, reduction='sum').data.item()
         val_floss += F.cross_entropy(fused_logits, global_act_labels, reduction='sum').data.item()
+        # 计算正确预测数
         n_gcorrect += torch.sum(torch.argmax(global_logits, 1) == global_act_labels).item()
         n_lcorrect += torch.sum(torch.argmax(local_logits, 1) == local_act_labels).item()
         n_fcorrect += torch.sum(torch.argmax(fused_logits, 1) == global_act_labels).item()
         n_data += len(global_act_labels)
 
+    # 汇总分布式训练结果
     n_data = sum(all_gather(n_data))
     val_gloss = sum(all_gather(val_gloss)) / n_data
     val_lloss = sum(all_gather(val_lloss)) / n_data
@@ -439,8 +529,11 @@ def validate_sap(model, val_loader):
     return val_log
 
 def build_args():
+    """
+    构建命令行参数
+    """
     parser = load_parser()
-
+    #从“duet/pretrain_src/config/r2r_pretrain.json” 中读取配置
     opts = parse_with_config(parser)
 
     if os.path.exists(opts.output_dir) and os.listdir(opts.output_dir):

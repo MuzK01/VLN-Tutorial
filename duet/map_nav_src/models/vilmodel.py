@@ -660,6 +660,7 @@ class ClsPrediction(nn.Module):
 class GlocalTextPathNavCMT(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
+        #这里的模块和pretrain阶段可以一一对应，加载权重也对应加载
         self.embeddings = BertEmbeddings(config)
         self.lang_encoder = LanguageEncoder(config)
 
@@ -752,6 +753,7 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         gmap_masks, gmap_pair_dists, gmap_visited_masks, gmap_vpids,
         vp_img_embeds, vp_pos_fts, vp_masks, vp_nav_masks, vp_obj_masks, vp_cand_vpids,
     ):
+        #做出导航决策的函数
         batch_size = txt_embeds.size(0)
 
         # global branch
@@ -765,16 +767,19 @@ class GlocalTextPathNavCMT(BertPreTrainedModel):
         else:
             graph_sprels = None
 
+        #基于全局信息做视觉语言融合，再做一次self-attention
         gmap_embeds = self.global_encoder.encoder(
             txt_embeds, txt_masks, gmap_embeds, gmap_masks,
             graph_sprels=graph_sprels
         )
        
         # local branch
+        #基于局部信息做视觉语言融合，再做一次self-attention
         vp_embeds = vp_img_embeds + self.local_encoder.vp_pos_embeddings(vp_pos_fts)
         vp_embeds = self.local_encoder.encoder(txt_embeds, txt_masks, vp_embeds, vp_masks)
             
         # navigation logits
+        # 和pretrain阶段一样，计算权重，然后合并全局和局部的决策结果
         if self.sap_fuse_linear is None:
             fuse_weights = 0.5
         else:

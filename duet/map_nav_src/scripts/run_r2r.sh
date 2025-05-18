@@ -60,8 +60,8 @@ CUDA_VISIBLE_DEVICES='0' python r2r/main_nav.py $flag  \
       --bert_ckpt_file 'put the pretrained model (see pretrain_src) here' \
       --eval_first
 
-# test
-CUDA_VISIBLE_DEVICES='0' python r2r/main_nav.py $flag  \
-      --tokenizer bert \
-      --resume_file ../datasets/R2R/trained_models/best_val_unseen \
-      --test --submit
+# # test
+# CUDA_VISIBLE_DEVICES='0' python r2r/main_nav.py $flag  \
+#       --tokenizer bert \
+#       --resume_file ../datasets/R2R/trained_models/best_val_unseen \
+#       --test --submit

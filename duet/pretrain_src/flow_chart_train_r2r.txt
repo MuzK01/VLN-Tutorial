@@ -1,0 +1,78 @@
+┌─────────────────────────┐
+│ Initialize Environment  │
+│ - Set CUDA environment  │
+│ - Set random seed       │
+│ - Set up loggers        │
+└───────────┬─────────────┘
+            ▼
+┌─────────────────────────┐
+│ Load Model Configuration│
+│ - Load config from JSON │
+│ - Set up tokenizer      │
+└───────────┬─────────────┘
+            ▼
+┌─────────────────────────┐
+│ Initialize Model        │
+│ - Load checkpoint or    │
+│   initialize from BERT/ │
+│   LXMERT                │
+│ - Set dropout           │
+│ - Wrap model for GPU    │
+└───────────┬─────────────┘
+            ▼
+┌─────────────────────────┐
+│ Prepare Data            │
+│ - Load R2R datasets     │
+│   (train, val_seen,     │
+│    val_unseen)          │
+│ - Create dataloaders    │
+│   for different tasks   │
+│   (MLM, MRC, SAP)       │
+└───────────┬─────────────┘
+            ▼
+┌─────────────────────────┐
+│ Prepare Optimizer       │
+│ - Build optimizer       │
+│ - Set up FP16 training  │
+│   if enabled            │
+└───────────┬─────────────┘
+            ▼
+┌─────────────────────────┐
+│ Training Loop           │
+├─────────────────────────┤
+│ For each batch:         │
+│  ┌─────────────────────┐│
+│  │ 1. Forward Pass     ││
+│  │ - Process batch     ││
+│  │ - Compute loss      ││
+│  └──────────┬──────────┘│
+│             ▼           │
+│  ┌─────────────────────┐│
+│  │ 2. Backward Pass    ││
+│  │ - Scale loss for    ││
+│  │   gradient accum.   ││
+│  │ - loss.backward()   ││
+│  └──────────┬──────────┘│
+│             ▼           │
+│  ┌─────────────────────┐│
+│  │ 3. Update (if ready)││
+│  │ - Update LR         ││
+│  │ - Clip gradients    ││
+│  │ - Optimizer step    ││
+│  │ - Zero gradients    ││
+│  └──────────┬──────────┘│
+│             ▼           │
+│  ┌─────────────────────┐│
+│  │ 4. Logging & Valid. ││
+│  │ - Log metrics       ││
+│  │ - Periodic valid.   ││
+│  │ - Save checkpoint   ││
+│  └──────────┬──────────┘│
+└─────────────┬─────────────┘
+              ▼
+┌─────────────────────────┐
+│ Final Validation        │
+│ - Validate on seen and  │
+│   unseen environments   │
+│ - Save final model      │
+└─────────────────────────┘

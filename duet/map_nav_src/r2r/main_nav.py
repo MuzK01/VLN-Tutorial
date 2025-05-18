@@ -6,7 +6,8 @@ from collections import defaultdict
 
 import torch
 from tensorboardX import SummaryWriter
-
+import sys
+sys.path.append("/projects/VLN-Tutorial/duet/map_nav_src")
 from utils.misc import set_random_seed
 from utils.logger import write_to_record_file, print_progress, timeSince
 from utils.distributed import init_distributed, is_default_gpu
@@ -83,19 +84,24 @@ def build_dataset(args, rank=0, is_test=False):
 
 
 def train(args, train_env, val_envs, aug_env=None, rank=-1):
-    default_gpu = is_default_gpu(args)
-
+    """
+    训练函数：实现模型训练和验证的主循环
+    """
+    # 初始化：日志、模型、记录文件等
+    default_gpu = is_default_gpu(args)  # 确定是否为主GPU进程
     if default_gpu:
+        # 设置日志记录
         with open(os.path.join(args.log_dir, 'training_args.json'), 'w') as outf:
             json.dump(vars(args), outf, indent=4)
         writer = SummaryWriter(log_dir=args.log_dir)
         record_file = os.path.join(args.log_dir, 'train.txt')
         write_to_record_file(str(args) + '\n\n', record_file)
 
+    # 创建导航智能体
     agent_class = GMapNavAgent
     listner = agent_class(args, train_env, rank=rank)
 
-    # resume file
+    # 如果有指定，从检查点恢复训练
     start_iter = 0
     if args.resume_file is not None:
         start_iter = listner.load(os.path.join(args.resume_file))
@@ -105,7 +111,7 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
                 record_file
             )
        
-    # first evaluation
+    # 可选的初始评估（训练前验证）
     if args.eval_first:
         loss_str = "validation before training"
         for env_name, env in val_envs.items():
@@ -124,12 +130,14 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
             write_to_record_file(loss_str, record_file)
         # return
 
+    # 记录训练开始时间
     start = time.time()
     if default_gpu:
         write_to_record_file(
             '\nListener training starts, start iteration: %s' % str(start_iter), record_file
         )
 
+    # 记录最佳验证结果
     best_val = {'val_unseen': {"spl": 0., "sr": 0., "state":""}}
     if args.dataset == 'r4r':
         best_val = {'val_unseen_sampled': {"spl": 0., "sr": 0., "state":""}}
@@ -139,26 +147,27 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
         interval = min(args.log_every, args.iters-idx)
         iter = idx + interval
 
-        # Train for log_every interval
+        # 训练log_every轮次
         if aug_env is None:
+            # 使用原始训练环境
             listner.env = train_env
-            listner.train(interval, feedback=args.feedback)  # Train interval iters
+            listner.train(interval, feedback=args.feedback)  # 训练interval次迭代
         else:
-            jdx_length = len(range(interval // 2))
+            # 使用原始数据和增强数据交替训练
             for jdx in range(interval // 2):
-                # Train with GT data
+                # 使用原始数据训练
                 listner.env = train_env
                 listner.train(1, feedback=args.feedback)
 
-                # Train with Augmented data
+                # 使用增强数据训练
                 listner.env = aug_env
                 listner.train(1, feedback=args.feedback)
 
                 if default_gpu:
-                    print_progress(jdx, jdx_length, prefix='Progress:', suffix='Complete', bar_length=50)
+                    print_progress(jdx, interval // 2, prefix='Progress:', suffix='Complete', bar_length=50)
 
         if default_gpu:
-            # Log the training stats to tensorboard
+            # 计算各种损失值，并记录到tensorboard
             total = max(sum(listner.logs['total']), 1)          # RL: total valid actions for all examples in the batch
             length = max(len(listner.logs['critic_loss']), 1)   # RL: total (max length) in the batch
             critic_loss = sum(listner.logs['critic_loss']) / total
@@ -178,29 +187,34 @@ def train(args, train_env, val_envs, aug_env=None, rank=-1):
                 record_file
             )
 
-        # Run validation
+        # ===== 验证阶段 =====
+        # 在每个验证环境上评估模型
         loss_str = "iter {}".format(iter)
         for env_name, env in val_envs.items():
             listner.env = env
-
-            # Get validation distance from goal under test evaluation conditions
+            # 在测试条件下评估
             listner.test(use_dropout=False, feedback='argmax', iters=None)
             preds = listner.get_results()
+            
+            # 合并分布式结果（多GPU情况）
             preds = merge_dist_results(all_gather(preds))
-
+            
             if default_gpu:
+                # 计算评估指标
                 score_summary, _ = env.eval_metrics(preds)
                 loss_str += ", %s " % env_name
                 for metric, val in score_summary.items():
                     loss_str += ', %s: %.2f' % (metric, val)
                     writer.add_scalar('%s/%s' % (metric, env_name), score_summary[metric], idx)
 
-                # select model by spl
+                # 根据SPL指标选择最佳模型
                 if env_name in best_val:
                     if score_summary['spl'] >= best_val[env_name]['spl']:
+                        # 更新最佳记录
                         best_val[env_name]['spl'] = score_summary['spl']
                         best_val[env_name]['sr'] = score_summary['sr']
                         best_val[env_name]['state'] = 'Iter %d %s' % (iter, loss_str)
+                        # 保存最佳模型
                         listner.save(idx, os.path.join(args.ckpt_dir, "best_%s" % (env_name)))
                 
         
@@ -265,20 +279,32 @@ def valid(args, train_env, val_envs, rank=-1):
 
 
 def main():
+    """
+    主函数：程序入口点
+    初始化环境并根据参数执行训练或测试流程
+    """
+    # 解析命令行参数
     args = parse_args()
 
+    # 分布式训练设置（多GPU）
     if args.world_size > 1:
         rank = init_distributed(args)
         torch.cuda.set_device(args.local_rank)
     else:
         rank = 0
 
+    # 设置随机种子确保可重复性
     set_random_seed(args.seed + rank)
+    
+    # 构建数据集：训练环境、验证环境和可选的增强数据环境
     train_env, val_envs, aug_env = build_dataset(args, rank=rank, is_test=args.test)
 
+    # 根据参数选择训练或测试模式
     if not args.test:
+        # 训练模式
         train(args, train_env, val_envs, aug_env=aug_env, rank=rank)
     else:
+        # 测试模式
         valid(args, train_env, val_envs, rank=rank)
             
 

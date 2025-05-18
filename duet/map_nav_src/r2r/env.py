@@ -258,6 +258,7 @@ class R2RNavBatch(object):
             # [visual_feature, angle_feature] for views
             feature = np.concatenate((feature, self.angle_feature[base_view_id]), -1)
 
+            #环境观测的结构
             ob = {
                 'instr_id' : item['instr_id'],
                 'scan' : state.scanId,
