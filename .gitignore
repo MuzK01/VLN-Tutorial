@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-data/
+un_upload_data/
 datasets/
 ResNet-152-imagenet.tsv
 snapshots/
